@@ -90,6 +90,11 @@ Ogg/Vorbis/Opus, WebP, zlib, fmt, GLM, pugixml, utfcpp, concurrentqueue,
 readerwriterqueue, unordered-dense, boost-circular-buffer, toml11, FreeType,
 HarfBuzz and libass. The explicit dependency preparation step also obtains
 pinned LibAtrac9 and magic_enum sources.
+
+The manifest overrides fmt to 11.2.0 to match KiriKiri's Windows ABI.
+Both cores ship `fmt.dll`, and Windows reuses the first loaded module by
+basename. Keep Impacto, OpenAL Soft and KiriKiri on fmt v11 together; upgrading
+only Impacto to v12 prevents KiriKiri from resolving its v11 imports.
 Desktop OpenGL 3.3 and a working native audio device are required. ImGui,
 Vulkan and DirectX9 are excluded from this target.
 
