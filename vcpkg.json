@@ -56,6 +56,10 @@
   ],
   "overrides": [
     {
+      "name": "fmt",
+      "version": "11.2.0"
+    },
+    {
       "name": "ffmpeg",
       "version": "7.1.2#5"
     },
