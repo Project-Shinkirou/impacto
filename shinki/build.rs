@@ -1,5 +1,5 @@
 use shinki_emu_build::{
-    configure_cmake, generate_import_library, link_android_static_core, link_apple_static_core, native_vcpkg_installation,
+    android_ndk, configure_cmake, generate_import_library, inputs, link_android_static_core, link_apple_static_core, vcpkg,
     write_core_build_manifest, BuildAsset, CoreBuildManifest,
 };
 use std::{
@@ -11,19 +11,9 @@ use std::{
 
 type Result<T, E = Box<dyn Error>> = std::result::Result<T, E>;
 
-fn required_dir(name: &str) -> Result<PathBuf> {
-    let path = PathBuf::from(env::var_os(name).ok_or_else(|| {
-        format!("{name} is required; run cargo xtask deps for the selected Impacto target")
-    })?);
-    if !path.is_dir() {
-        return Err(format!("{name} directory is missing: {}", path.display()).into());
-    }
-    Ok(std::path::absolute(path)?)
-}
-
 fn require_file(path: &Path) -> Result<()> {
     if !path.is_file() {
-        return Err(format!("missing Impacto build prerequisite: {}; run cargo xtask deps for the selected target", path.display()).into());
+        return Err(format!("missing Impacto build prerequisite: {}", path.display()).into());
     }
     Ok(())
 }
@@ -51,11 +41,6 @@ fn copy_tree(source: &Path, dest: &Path) -> Result<()> {
 
 fn build() -> Result<()> {
     for name in [
-        "SHINKI_EMU_NATIVE_DOWNLOADS",
-        "VCPKG_ROOT",
-        "SHINKI_EMU_NATIVE_VCPKG_ROOT",
-        "SHINKI_EMU_VCPKG_TRIPLET",
-        "SHINKI_EMU_FFMPEG_INSTALLED",
         "ANDROID_NDK_HOME",
         "NUM_JOBS",
         "PROFILE",
@@ -92,45 +77,10 @@ fn build() -> Result<()> {
 
     let adapter = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").ok_or("CARGO_MANIFEST_DIR is required")?);
     let source = std::path::absolute(adapter.parent().ok_or("adapter must be in the Impacto checkout")?)?;
-    let vcpkg = required_dir("VCPKG_ROOT")?;
-    let installed = native_vcpkg_installation("impacto")?;
-    let triplet = env::var("SHINKI_EMU_VCPKG_TRIPLET")?;
-    let expected_triplet = match target.as_str() {
-        "x86_64-pc-windows-msvc" => "x64-windows",
-        "x86_64-unknown-linux-gnu" => "x64-linux-dynamic",
-        "x86_64-apple-darwin" => "x64-osx",
-        "aarch64-apple-darwin" => "arm64-osx",
-        "aarch64-apple-ios" => "arm64-ios",
-        "aarch64-apple-ios-sim" => "arm64-ios-simulator",
-        "x86_64-apple-ios" => "x64-ios",
-        "aarch64-linux-android" => "arm64-android-ffmpeg",
-        "x86_64-linux-android" => "x64-android-ffmpeg",
-        _ => unreachable!(),
-    };
-    if triplet != expected_triplet {
-        return Err(format!("Impacto requires the {expected_triplet} dependency triplet, got {triplet}").into());
-    }
-    if let Some(raw) = env::var_os("SHINKI_EMU_FFMPEG_INSTALLED") {
-        let ffmpeg = PathBuf::from(raw);
-        if !ffmpeg.is_dir() {
-            return Err(format!("SHINKI_EMU_FFMPEG_INSTALLED directory is missing: {}", ffmpeg.display()).into());
-        }
-        let mut prefixes = vec![installed.join(&triplet), ffmpeg.clone()];
-        if let Some(existing) = env::var_os("CMAKE_PREFIX_PATH") {
-            prefixes.extend(env::split_paths(&existing));
-        }
-        unsafe { env::set_var("CMAKE_PREFIX_PATH", env::join_paths(prefixes)?); }
-        let mut pkgconfig = vec![
-            installed.join(&triplet).join("lib/pkgconfig"),
-            installed.join(&triplet).join("share/pkgconfig"),
-            ffmpeg.join("lib/pkgconfig"),
-            ffmpeg.join("share/pkgconfig"),
-        ];
-        if let Some(existing) = env::var_os("PKG_CONFIG_PATH") {
-            pkgconfig.extend(env::split_paths(&existing));
-        }
-        unsafe { env::set_var("PKG_CONFIG_PATH", env::join_paths(pkgconfig)?); }
-    }
+    let installation = vcpkg::install_core(&source, "impacto")?;
+    let installed = installation.install_root.join("installed");
+    let triplet = installation.triplet;
+    let vcpkg = installation.root;
     let toolchain = vcpkg.join("scripts/buildsystems/vcpkg.cmake");
     require_file(&toolchain)?;
     println!("cargo:rerun-if-changed={}", toolchain.display());
@@ -141,16 +91,11 @@ fn build() -> Result<()> {
         }
     }
     let share = installed.join(&triplet).join("share");
-    let ffmpeg_installed = env::var_os("SHINKI_EMU_FFMPEG_INSTALLED").map(PathBuf::from);
     for port in ["sdl3", "avcpp", "openal-soft", "libvorbis", "libwebp", "freetype", "harfbuzz"] {
         require_file(&share.join(port).join("copyright"))?;
     }
-    if ffmpeg_installed.is_none() {
-        require_file(&share.join("ffmpeg").join("copyright"))?;
-    }
-    let downloads = required_dir("SHINKI_EMU_NATIVE_DOWNLOADS")?;
-    let atrac_source = downloads.join("libatrac9");
-    let magic = downloads.join("magic_enum");
+    require_file(&share.join("ffmpeg").join("copyright"))?;
+    let (atrac_source, magic) = inputs::impacto_sources()?;
     require_file(&atrac_source.join("C/src/libatrac9.c"))?;
     require_file(&magic.join("CMakeLists.txt"))?;
     require_file(&magic.join("include/magic_enum/magic_enum.hpp"))?;
@@ -173,6 +118,7 @@ fn build() -> Result<()> {
             toolchain.to_string_lossy().into_owned(),
         ),
         ("VCPKG_INSTALLED_DIR".into(), installed.to_string_lossy().into_owned()),
+        ("VCPKG_TARGET_TRIPLET".into(), triplet.clone()),
         ("IMPACTO_SHINKI_EMU".into(), "ON".into()),
         (
             "IMPACTO_SHINKI_EMU_STATIC".into(),
@@ -195,7 +141,7 @@ fn build() -> Result<()> {
         ("CMAKE_INSTALL_INCLUDEDIR".into(), "include".into()),
     ];
     if target.ends_with("-linux-android") {
-        let ndk = required_dir("ANDROID_NDK_HOME")?;
+        let ndk = android_ndk()?;
         let android_toolchain = ndk.join("build/cmake/android.toolchain.cmake");
         require_file(&android_toolchain)?;
         println!("cargo:rerun-if-changed={}", android_toolchain.display());
@@ -208,7 +154,6 @@ fn build() -> Result<()> {
         // are available. Chainload the NDK before CMake selects any compiler.
         definitions.extend([
             ("VCPKG_CHAINLOAD_TOOLCHAIN_FILE".into(), android_toolchain.to_string_lossy().into_owned()),
-            ("VCPKG_TARGET_TRIPLET".into(), triplet.clone()),
             ("ANDROID_ABI".into(), abi.into()),
             ("ANDROID_PLATFORM".into(), "android-28".into()),
             ("ANDROID_STL".into(), "c++_shared".into()),
@@ -307,27 +252,6 @@ fn build() -> Result<()> {
                 source: copyright,
                 dest: format!("licenses/impacto/vcpkg/{name}/copyright"),
             });
-        }
-    }
-    if let Some(ffmpeg) = ffmpeg_installed {
-        let ffmpeg_share = ffmpeg.join("share");
-        let mut ffmpeg_ports = fs::read_dir(&ffmpeg_share)?.collect::<std::io::Result<Vec<_>>>()?;
-        ffmpeg_ports.sort_by_key(|entry| entry.file_name());
-        for port in ffmpeg_ports {
-            if !port.file_type()?.is_dir() {
-                continue;
-            }
-            let copyright = port.path().join("copyright");
-            if copyright.is_file() {
-                let name = port
-                    .file_name()
-                    .into_string()
-                    .map_err(|_| "non-UTF-8 FFmpeg port name")?;
-                manifest.licenses.push(BuildAsset {
-                    source: copyright,
-                    dest: format!("licenses/impacto/vcpkg/ffmpeg/{name}/copyright"),
-                });
-            }
         }
     }
     write_core_build_manifest(&manifest)?;
