@@ -2,6 +2,10 @@
 
 #include "../window.h"
 
+#if defined(__ANDROID__) && defined(IMPACTO_SHINKI_EMU)
+#include <EGL/egl.h>
+#endif
+
 namespace Impacto {
 namespace OpenGL {
 
@@ -15,7 +19,9 @@ class GLWindow : public BaseWindow {
   void Draw() override;
   void Shutdown() override;
 
+#if !defined(__ANDROID__) || !defined(IMPACTO_SHINKI_EMU)
   SDL_GLContext GLContext;
+#endif
 
   // FBO of current render target for drawing onto
   GLuint DrawRT;
@@ -28,7 +34,15 @@ class GLWindow : public BaseWindow {
 
  private:
   void UpdateDimensions() override;
+#if defined(__ANDROID__) && defined(IMPACTO_SHINKI_EMU)
+  void CreateAndroidGL();
+  EGLDisplay Display = EGL_NO_DISPLAY;
+  EGLSurface Pbuffer = EGL_NO_SURFACE;
+  EGLContext Context = EGL_NO_CONTEXT;
+  bool GLReady = false;
+#else
   void TryCreateGL(GraphicsApi api);
+#endif
   void CleanFBOs();
 
   [[maybe_unused]] bool GLDebug = false;

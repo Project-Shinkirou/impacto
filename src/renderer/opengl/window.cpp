@@ -2,6 +2,11 @@
 
 #include <glad/glad.h>
 #include <SDL3/SDL_opengl.h>
+#if defined(__ANDROID__) && defined(IMPACTO_SHINKI_EMU)
+#define SDL_MAIN_HANDLED
+#include <SDL3/SDL_main.h>
+#include <stdexcept>
+#endif
 
 #include "../renderer.h"
 
@@ -42,6 +47,50 @@ void GLWindow::UpdateDimensions() {
   // SDL_SetWindowInputFocus(SDLWindow);
 }
 
+#if defined(__ANDROID__) && defined(IMPACTO_SHINKI_EMU)
+void GLWindow::CreateAndroidGL() {
+  // The Manager owns the Activity and physical surface. SDL provides an
+  // in-memory window and event queue; EGL owns this worker's native raster.
+  SDL_SetMainReady();
+  if (!SDL_SetHintWithPriority(SDL_HINT_VIDEO_DRIVER, "offscreen", SDL_HINT_OVERRIDE) ||
+      !SDL_Init(SDL_INIT_VIDEO) || !CreateSDLWindow(0))
+    throw std::runtime_error(SDL_GetError());
+
+  const auto check = [](bool success) {
+    if (!success)
+      throw std::runtime_error(fmt::format("Impacto EGL error 0x{:x}", eglGetError()));
+  };
+  EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+  check(display != EGL_NO_DISPLAY && eglInitialize(display, nullptr, nullptr));
+  Display = display;
+  check(eglBindAPI(EGL_OPENGL_ES_API));
+  const EGLint configAttributes[] = {
+      EGL_SURFACE_TYPE, EGL_PBUFFER_BIT, EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
+      EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8,
+      EGL_NONE,
+  };
+  EGLConfig config;
+  EGLint count;
+  check(eglChooseConfig(Display, configAttributes, &config, 1, &count) == EGL_TRUE);
+  if (count != 1) throw std::runtime_error("Impacto needs an RGBA8 EGL pbuffer");
+  const EGLint surfaceAttributes[] = {
+      EGL_WIDTH, WindowWidth, EGL_HEIGHT, WindowHeight, EGL_NONE,
+  };
+  Pbuffer = eglCreatePbufferSurface(Display, config, surfaceAttributes);
+  check(Pbuffer != EGL_NO_SURFACE);
+  const EGLint contextAttributes[] = {
+      EGL_CONTEXT_MAJOR_VERSION, 3, EGL_CONTEXT_MINOR_VERSION, 2,
+#if IMPACTO_GL_DEBUG
+      EGL_CONTEXT_OPENGL_DEBUG, EGL_TRUE,
+#endif
+      EGL_NONE,
+  };
+  Context = eglCreateContext(Display, config, EGL_NO_CONTEXT, contextAttributes);
+  check(Context != EGL_NO_CONTEXT);
+  check(eglMakeCurrent(Display, Pbuffer, Pbuffer, Context));
+  ActualGraphicsApi = GfxApi_ForceNativeGLES;
+}
+#else
 void GLWindow::TryCreateGL(GraphicsApi api) {
   if (GLContext != NULL) return;
 
@@ -124,12 +173,16 @@ void GLWindow::TryCreateGL(GraphicsApi api) {
   ImGui_ImplOpenGL3_Init();
 #endif
 }
+#endif
 
 void GLWindow::Init() {
   assert(IsInit == false);
   ImpLog(LogLevel::Info, LogChannel::General, "Creating window\n");
   IsInit = true;
 
+#if defined(__ANDROID__) && defined(IMPACTO_SHINKI_EMU)
+  CreateAndroidGL();
+#else
 #ifdef __ANDROID__
   SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
 #endif
@@ -164,12 +217,17 @@ void GLWindow::Init() {
     Shutdown();
     return;
   }
+#endif
 
   SDL_GetWindowSize(SDLWindow, &WindowWidth, &WindowHeight);
   ImpLog(LogLevel::Debug, LogChannel::General,
          "Window size (screen coords): {:d} x {:d}\n", WindowWidth,
          WindowHeight);
 
+#if defined(__ANDROID__) && defined(IMPACTO_SHINKI_EMU)
+  bool gladOk = gladLoadGLES2Loader(reinterpret_cast<GLADloadproc>(eglGetProcAddress));
+  GLReady = gladOk;
+#else
   bool gladOk;
   if (ActualGraphicsApi == GfxApi_GL) {
     gladOk =
@@ -178,6 +236,7 @@ void GLWindow::Init() {
     gladOk = gladLoadGLES2Loader(
         reinterpret_cast<GLADloadproc>(SDL_GL_GetProcAddress));
   }
+#endif
   if (!gladOk) {
     ImpLog(LogLevel::Fatal, LogChannel::General,
            "GLAD initialisation failed\n");
@@ -190,8 +249,8 @@ void GLWindow::Init() {
 
 #if IMPACTO_GL_DEBUG
   int glContextVersion[2]{};
-  SDL_GL_GetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, glContextVersion);
-  SDL_GL_GetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, glContextVersion + 1);
+  glGetIntegerv(GL_MAJOR_VERSION, glContextVersion);
+  glGetIntegerv(GL_MINOR_VERSION, glContextVersion + 1);
   bool isDesktopGL = ActualGraphicsApi == GfxApi_GL;
   bool isVer3_2 = glContextVersion[0] >= 3 && glContextVersion[1] >= 2;
   if (!isDesktopGL && !isVer3_2) {
@@ -221,7 +280,9 @@ void GLWindow::Init() {
 #endif
 
   // Vsync
+#if !defined(__ANDROID__) || !defined(IMPACTO_SHINKI_EMU)
   SDL_GL_SetSwapInterval(0);
+#endif
 }
 
 void GLWindow::SetDimensions(int width, int height, int msaa,
@@ -361,11 +422,27 @@ void GLWindow::Shutdown() {
 #ifdef IMPACTO_SHINKI_EMU
   if (!Shinki::IsClosing()) Shinki::NativeExit(1);
 #endif
+#if defined(__ANDROID__) && defined(IMPACTO_SHINKI_EMU)
+  if (GLReady) CleanFBOs();
+  GLReady = false;
+  if (Display != EGL_NO_DISPLAY) {
+    if (eglGetCurrentContext() == Context && Context != EGL_NO_CONTEXT)
+      eglMakeCurrent(Display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+    if (Context != EGL_NO_CONTEXT) eglDestroyContext(Display, Context);
+    if (Pbuffer != EGL_NO_SURFACE) eglDestroySurface(Display, Pbuffer);
+    eglTerminate(Display);
+    Context = EGL_NO_CONTEXT;
+    Pbuffer = EGL_NO_SURFACE;
+    Display = EGL_NO_DISPLAY;
+  }
+  eglReleaseThread();
+#else
   if (GLContext) {
     CleanFBOs();
     SDL_GL_DestroyContext(GLContext);
     GLContext = nullptr;
   }
+#endif
   if (SDLWindow) SDL_DestroyWindow(SDLWindow);
   SDLWindow = nullptr;
   IsInit = false;

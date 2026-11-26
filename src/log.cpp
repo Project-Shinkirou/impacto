@@ -141,6 +141,11 @@ void LogInit() {
 }
 
 std::string GetDefaultLogFile() {
+#if defined(__ANDROID__) && defined(IMPACTO_SHINKI_EMU)
+  // This initializer also runs at dlopen, without an SDLActivity. The core
+  // routes session logs to the ABI host and does not open a log file.
+  return {};
+#else
   constexpr std::string_view logFileName = "Impacto_Log.txt";
   std::filesystem::path result;
 #if defined(__SWITCH__)
@@ -161,6 +166,7 @@ std::string GetDefaultLogFile() {
     SDL_free(prefPath);
   }
   return (result / logFileName).string();
+#endif
 #endif
 }
 

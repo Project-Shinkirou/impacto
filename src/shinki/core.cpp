@@ -50,7 +50,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) || defined(__ANDROID__)
 #include <dlfcn.h>
 #endif
 
@@ -669,6 +669,12 @@ fs::path DefaultResourceRoot() {
   return fs::weakly_canonical(
       fs::path(std::wstring_view(path.data(), length)).parent_path() /
       "Resources");
+#elif defined(__ANDROID__)
+  Dl_info info{};
+  if (!dladdr(reinterpret_cast<const void*>(&DefaultResourceRoot), &info) ||
+      !info.dli_fname || !fs::path(info.dli_fname).is_absolute())
+    throw std::invalid_argument("Cannot locate the installed Android core");
+  return fs::path(info.dli_fname).parent_path() / "Resources";
 #elif defined(__APPLE__)
   Dl_info info{};
   if (!dladdr(reinterpret_cast<const void*>(&DefaultResourceRoot), &info) || !info.dli_fname)

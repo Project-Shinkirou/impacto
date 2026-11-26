@@ -80,6 +80,16 @@ namespace Game {
 static float GameStateSecondCounter = 0.0f;
 static float SystemSecondCounter = 0.0f;
 
+static bool PollGameEvent(SDL_Event& event) {
+#if defined(__ANDROID__) && defined(IMPACTO_SHINKI_EMU)
+  // Manager supplies input and lifecycle. SDL_PollEvent also pumps the
+  // standalone SDLActivity's Android event queue, which does not exist here.
+  return SDL_PeepEvents(&event, 1, SDL_GETEVENT, SDL_EVENT_FIRST, SDL_EVENT_LAST) == 1;
+#else
+  return SDL_PollEvent(&event);
+#endif
+}
+
 void Init() {
   GameStateSecondCounter = SystemSecondCounter = 0.0f;
   SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "0");
@@ -233,7 +243,7 @@ void LauncherUpdate(float dt) {
 
   RequestCursor(CursorType::Default);
 
-  while (SDL_PollEvent(&e)) {
+  while (PollGameEvent(e)) {
     if (e.type == SDL_EVENT_QUIT) {
       ShouldQuit = true;
     }
@@ -309,7 +319,7 @@ void UpdateSystem(float dt) {
     RequestCursor(CursorType::Default);
   }
 
-  while (SDL_PollEvent(&e)) {
+  while (PollGameEvent(e)) {
     if (e.type == SDL_EVENT_QUIT) {
       if (Profile::Patch::HasScriptedExitLogic) {
         Input::KeyboardButtonWentDown[SDL_SCANCODE_ESCAPE] = true;

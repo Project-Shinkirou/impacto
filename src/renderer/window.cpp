@@ -364,8 +364,10 @@ bool BaseWindow::CreateSDLWindow(SDL_WindowFlags flags) {
     return false;
   }
   SDL_GetWindowSizeInPixels(SDLWindow, &WindowWidth, &WindowHeight);
-#ifdef __ANDROID__
+#if defined(__ANDROID__)
+#ifndef IMPACTO_SHINKI_EMU
   SDL_SetWindowFullscreen(SDLWindow, true);
+#endif
 #else
   SetWindowedSizing();
 #endif

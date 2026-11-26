@@ -1,0 +1,6 @@
+{
+    global:
+        shinki_emu_query;
+        shinki_emu_impacto_query;
+    local: *;
+};

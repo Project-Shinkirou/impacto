@@ -1,5 +1,5 @@
 use shinki_emu_build::{
-    android_ndk, configure_cmake, generate_import_library, inputs, link_android_static_core, link_apple_static_core, vcpkg,
+    android_ndk, configure_cmake, generate_import_library, inputs, link_apple_static_core, vcpkg,
     write_core_build_manifest, BuildAsset, CoreBuildManifest,
 };
 use std::{
@@ -64,7 +64,10 @@ fn build() -> Result<()> {
             | "x86_64-linux-android"
     );
     if !supported {
-        return Err(format!("Impacto's embedded adapter does not support HOST={host}, TARGET={target}").into());
+        return Err(format!("Impacto's adapter does not support HOST={host}, TARGET={target}").into());
+    }
+    if cfg!(feature = "static") && target.ends_with("-linux-android") {
+        return Err("The Android Impacto core must be built as a shared library".into());
     }
     // configure_cmake reads NUM_JOBS. Cap the native build even when Cargo has
     // been started outside xtask with a higher job count.
@@ -172,7 +175,9 @@ fn build() -> Result<()> {
     } else {
         let name = if target == "x86_64-pc-windows-msvc" {
             "shinki_emu_impacto.dll"
-        } else if target == "x86_64-unknown-linux-gnu" || target.ends_with("-linux-android") {
+        } else if target.ends_with("-linux-android") {
+            "libshinki_emu_impacto.so"
+        } else if target == "x86_64-unknown-linux-gnu" {
             "shinki_emu_impacto.so"
         } else {
             "shinki_emu_impacto.dylib"
@@ -189,9 +194,6 @@ fn build() -> Result<()> {
     println!("cargo:rustc-link-search=native={}", stage.join("lib").display());
     let library = if cfg!(feature = "static") && target.contains("apple") {
         link_apple_static_core("impacto", &native, &[installed.join(&triplet)])?
-    } else if cfg!(feature = "static") && target.ends_with("-linux-android") {
-        link_android_static_core(&native, &[installed.join(&triplet)])?;
-        library
     } else if cfg!(feature = "static") {
         println!("cargo:rustc-link-lib=static=shinki_emu_impacto");
         library

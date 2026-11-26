@@ -40,6 +40,11 @@ movie-audio planes and their pointer array. The shared core exports the current
 ShinkiEMU C ABI v3 directly: plugin `impacto`, engine family `mages`.
 Upstream release `0.10.8.930` (`3706ddd89d4ad4aed0e32e127355c4251f22e574`)
 is merged over that history, retaining the native repairs and adapter.
+On Android the adapter uses its own SDL offscreen event queue and a worker-owned
+EGL pbuffer, without SDLActivity or a second window. The standalone core loads
+`Resources` beside its library when `resources_root` is empty. Its ZIP carries
+the matching ABI's runtime dependencies and notices; Android system libraries
+come from the device. The desktop fmt 11.2.0 pin is unchanged.
 `vendor/shinki-emu-abi/include/shinki_emu.h` is an unchanged byte copy of the
 cbindgen-generated header from ShinkiEMU
 `cb8d9dd22d7d0ab129085b324c94d6dc81fa19e3`,
@@ -54,8 +59,6 @@ Adapter paths are decoded explicitly as UTF-8 using C++20 `char8_t` views, inclu
 macOS links the SDK's OpenGL framework explicitly, keeping XQuartz libraries out of relocatable core packages.
 
 The Cargo `static` feature builds a static adapter and codec archive, suppresses the generic dynamic query export, and records `native-static` plus runtime resources in `core-build.json`. Apple static builds use the shared native archive/link-closure helper. iOS resources are read from the Manager bundle's `cores/impacto/Resources`; macOS dylibs resolve their adjacent `Resources` directory.
-
-Android static builds install the complete in-tree archive set and propagate the target vcpkg/pkg-config link closure to Cargo. The bundled Lua 5.4 public entry points and `lua_ident` data symbol are prefixed with `shinki_impacto_` in static builds so the Manager's Luau ABI remains independent. Native dependency installs use a separate `installed-<triplet>` tree for each ABI. The GLib overlay carries the Windows-host Android `gdb_install_dir` fix from the KiriKiri2 fork. Android resources must be supplied through `resources_root`, pointing to the Manager's extracted `cores/impacto/Resources` directory; the adapter does not treat APK assets as filesystem paths.
 
 The Android adapter chainloads the NDK CMake toolchain through vcpkg before compiler discovery, selecting `arm64-v8a` or `x86_64` from the Cargo target, API 28 and `c++_shared`. `ANDROID_NDK_HOME` must point to the provisioned NDK; host C/C++ compilers and desktop OpenGL are not Android build inputs.
 UTF-8 paths from the C ABI are converted directly to Windows' native UTF-16 path storage or retained as UTF-8 on POSIX targets; the adapter does not use C++20's deprecated `u8path` constructor.
@@ -144,7 +147,8 @@ does not clear those distribution requirements.
 * `assets_root`: directory containing Steam CC's MPK files; an empty value uses
   `game_path/USRDIR`, or `game_path` when it already names USRDIR.
 * `resources_root`: directory containing `profiles/cc`, `resources/cc` and
-  `src/shaders/opengl`; empty selects the installed Windows core's `Resources`.
+  `src/shaders/opengl`; empty selects the installed core's `Resources` on
+  Windows, macOS and Android.
 * `save_root`: required isolated writable directory, outside game assets and
   core resources. It supplies native save, configuration and base paths.
 * `use_backup_archives`: boolean, defaults to true. This explicitly requires
