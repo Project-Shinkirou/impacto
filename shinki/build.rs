@@ -50,6 +50,7 @@ fn build() -> Result<()> {
         println!("cargo:rerun-if-env-changed={name}");
     }
     let target = env::var("TARGET")?;
+    let android = target.ends_with("-linux-android");
     let host = env::var("HOST")?;
     let supported = matches!(
         target.as_str(),
@@ -66,7 +67,7 @@ fn build() -> Result<()> {
     if !supported {
         return Err(format!("Impacto's adapter does not support HOST={host}, TARGET={target}").into());
     }
-    if cfg!(feature = "static") && target.ends_with("-linux-android") {
+    if cfg!(feature = "static") && android {
         return Err("The Android Impacto core must be built as a shared library".into());
     }
     // configure_cmake reads NUM_JOBS. Cap the native build even when Cargo has
@@ -80,7 +81,14 @@ fn build() -> Result<()> {
 
     let adapter = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").ok_or("CARGO_MANIFEST_DIR is required")?);
     let source = std::path::absolute(adapter.parent().ok_or("adapter must be in the Impacto checkout")?)?;
-    let installation = vcpkg::install_core(&source, "impacto")?;
+    // Use the product subtitle manifest's libass ABI on Android even though
+    // Impacto's manifest uses an older vcpkg baseline.
+    let overlays: &[_] = if android {
+        &[vcpkg::PortOverlay::Vcpkg("ports/libass")]
+    } else {
+        &[]
+    };
+    let installation = vcpkg::install_core_with_overlays(&source, "impacto", overlays)?;
     let installed = installation.install_root.join("installed");
     let triplet = installation.triplet;
     let vcpkg = installation.root;
