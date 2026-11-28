@@ -1483,8 +1483,11 @@ elseif (IMPACTO_SHINKI_EMU AND ANDROID)
     # and vcpkg inputs. CMake's desktop scanner would run host-side tooling.
     install(TARGETS impacto LIBRARY DESTINATION .)
 elseif (IMPACTO_SHINKI_EMU)
+    set(impacto_runtime_destination ./lib)
     if (LINUX)
-        set_property(TARGET impacto PROPERTY INSTALL_RPATH "$ORIGIN/lib")
+        # Standalone core packages stage runtime libraries beside the core.
+        set(impacto_runtime_destination .)
+        set_property(TARGET impacto PROPERTY INSTALL_RPATH "$ORIGIN")
     elseif (APPLE)
         set_property(TARGET impacto PROPERTY INSTALL_RPATH "@loader_path/lib")
     endif()
@@ -1496,14 +1499,14 @@ elseif (IMPACTO_SHINKI_EMU)
         FRAMEWORK DESTINATION .
     )
     install(TARGETS atrac9
-        LIBRARY DESTINATION ./lib
-        FRAMEWORK DESTINATION ./lib
+        LIBRARY DESTINATION ${impacto_runtime_destination}
+        FRAMEWORK DESTINATION ${impacto_runtime_destination}
     )
     install(RUNTIME_DEPENDENCY_SET impacto_runtime_deps
         POST_EXCLUDE_REGEXES ${post_exclude_regexes}
-        RUNTIME DESTINATION ./lib
-        LIBRARY DESTINATION ./lib
-        FRAMEWORK DESTINATION ./lib
+        RUNTIME DESTINATION ${impacto_runtime_destination}
+        LIBRARY DESTINATION ${impacto_runtime_destination}
+        FRAMEWORK DESTINATION ${impacto_runtime_destination}
     )
 elseif (ANDROID)
     install(TARGETS impacto LIBRARY DESTINATION ${CMAKE_SOURCE_DIR}/android/app/src/main/jniLibs/${CMAKE_ANDROID_ARCH_ABI})

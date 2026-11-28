@@ -83,8 +83,12 @@ fn build() -> Result<()> {
     let source = std::path::absolute(adapter.parent().ok_or("adapter must be in the Impacto checkout")?)?;
     // Use the product subtitle manifest's libass ABI on Android even though
     // Impacto's manifest uses an older vcpkg baseline.
+    // The workspace fmt 11.2.0 patch is needed only for Android Impacto.
     let overlays: &[_] = if android {
-        &[vcpkg::PortOverlay::Vcpkg("ports/libass")]
+        &[
+            vcpkg::PortOverlay::Vcpkg("ports/libass"),
+            vcpkg::PortOverlay::Workspace("mobile-ports"),
+        ]
     } else {
         &[]
     };

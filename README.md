@@ -106,32 +106,24 @@ Visual Studio** and run:
 
 ```bat
 set CARGO_BUILD_JOBS=4
-cargo xtask deps --target x86_64-pc-windows-msvc --core impacto
-cargo xtask build --target x86_64-pc-windows-msvc --core impacto --release
+cargo build --locked --release --target x86_64-pc-windows-msvc -p shinki-emu-core-impacto
 ```
 
 The independent Cargo entry is `shinki/Cargo.toml` (`shinki-emu-impacto`).
-The adapter uses Rust edition 2024 and requires Rust 1.98 or newer.
-Its `build.rs` validates the host/target and prepared dependencies, calls the
-existing CMake `install` target with at most four jobs, and records the real
-DLL in `OUT_DIR/core-build.json` as `native-shared`. Native objects, installed
+The adapter uses Rust edition 2024 and requires Rust 1.99 or newer.
+Its `build.rs` validates the host/target, prepares the pinned vcpkg installation
+and native sources, and calls the CMake `install` target with at most four jobs.
+It records the real DLL in `OUT_DIR/core-build.json` as `native-shared`.
 Resources and dependency DLLs stay under `OUT_DIR/native`; the source checkout
 is never an install destination. The Rust rlib binds the native query table,
 while the distributable DLL exports `shinki_emu_query`.
-
-For a direct Cargo invocation, dependency preparation must supply `VCPKG_ROOT`,
-`SHINKI_EMU_NATIVE_VCPKG_ROOT` (containing `impacto/installed`), `SHINKI_EMU_VCPKG_TRIPLET=x64-windows` and
-`SHINKI_EMU_NATIVE_DOWNLOADS` (containing `libatrac9` and `magic_enum`).
-`build.rs` runs offline: missing inputs fail with a dependency-preparation
-diagnostic. It never installs packages, fetches sources or runs Cargo.
 
 The output is `shinki_emu_impacto.dll`. Keep its native dependency DLLs beside
 it. `cmake --install` creates `Resources/profiles`, `Resources/resources` and
 `Resources/src/shaders` beside the DLL. On Windows an empty `resources_root`
 resolves only to that dynamic core's `Resources` directory. Source-tree
 acceptance passes this checkout explicitly as `resources_root`; no development
-checkout is compiled into the runtime. Static or non-Windows hosts must provide
-an explicit resource root. ISC `LICENSE` and the upstream `THIRDPARTY.md`
+checkout is compiled into the runtime. ISC `LICENSE` and the upstream `THIRDPARTY.md`
 remain part of the distribution.
 
 The build manifest includes the ISC license, third-party notices and prepared
@@ -140,6 +132,35 @@ review of bundled profile/resource permissions and the complete native DLL
 closure, plus the corresponding source and relinking materials required by
 the LGPL components listed in `THIRDPARTY.md`. Successful compilation alone
 does not clear those distribution requirements.
+
+### Linux runtime layout
+
+The Linux shared core and its runtime DSOs install beside each other. The core
+uses `$ORIGIN`, matching ShinkiEMU's flat package layout. ShinkiEMU's packager
+copies contained SONAME aliases as regular files under the names the loader
+requests. Windows and macOS keep their existing install rules. Linux still
+requires an explicit `resources_root` pointing to the packaged `Resources`.
+
+### Android builds and corresponding source
+
+Build in the matching ShinkiEMU workspace. The adapter selects both the pinned
+vcpkg `ports/libass` recipe and the workspace's `build/vcpkg/mobile-ports` fmt
+11.2.0 overlay only on Android. The fmt patch declares the allocation helpers
+used with the Android NDK; it does not change desktop dependency selection.
+
+Build and verify `aarch64-linux-android` (`arm64-v8a`) and `x86_64-linux-android`
+(`x86_64`) separately with
+`cargo xtask release --component impacto --target <triple>`. Both use the
+pinned NDK, Android API 28 and a CMake-built `libshinki_emu_impacto.so`. Keep
+the ELF and its private runtime dependencies beside `Resources` in the ZIP.
+
+For each ABI, supply the exact product and fork sources, pinned native source
+archives, vcpkg recipes and triplets, both selected overlays, patches, notices
+and build instructions. Rebuild through the same Cargo entry so it selects
+the same overlays. Verify that a recipient can modify an LGPL dependency such
+as statically linked FFmpeg or bundled libmspack, rebuild and relink the core,
+and load the rebuilt library. A core ZIP with license notices alone does not
+supply these materials.
 
 ### Typed configuration and acceptance
 
